@@ -64,6 +64,7 @@ const ProductEditor = ({ product, onClose, onSave, onDelete }) => {
     stock: 0, reserved: 0,
     location: { zone: 'A', row: 1, shelf: 1 },
     dims: { w: 0, h: 0, d: 0 },
+    rentalPrice: 0,
     notes: '', image: null,
   });
   const upd = (patch) => setForm(f => ({ ...f, ...patch }));
@@ -113,12 +114,15 @@ const ProductEditor = ({ product, onClose, onSave, onDelete }) => {
           <input type="number" min="1" max="4" value={form.location.shelf} onChange={(e) => updLoc({ shelf: +e.target.value })} /></div>
       </div>
 
-      <div style={{ fontSize: 13, fontWeight: 700, margin: '4px 0 10px' }}>מלאי ומידות</div>
-      <div className="field-row">
+      <div style={{ fontSize: 13, fontWeight: 700, margin: '4px 0 10px' }}>מלאי, מחיר ומידות</div>
+      <div className="field-row-3">
         <div className="field"><label>כמות במלאי</label>
           <input type="number" min="0" value={form.stock} onChange={(e) => upd({ stock: +e.target.value })} /></div>
-        <div className="field"><label>משוריין (ידני)</label>
-          <input type="number" min="0" value={form.reserved} onChange={(e) => upd({ reserved: +e.target.value })} disabled /></div>
+        <div className="field"><label>מחיר השכרה (₪ ליחידה)</label>
+          <input type="number" min="0" step="1" value={form.rentalPrice || 0}
+            onChange={(e) => upd({ rentalPrice: +e.target.value })} placeholder="0" /></div>
+        <div className="field"><label>משוריין (אוטומטי)</label>
+          <input type="number" min="0" value={form.reserved} disabled /></div>
       </div>
       <div className="field-row-3">
         <div className="field"><label>אורך (ס״מ)</label>

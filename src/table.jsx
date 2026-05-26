@@ -64,6 +64,7 @@ const InventoryTable = ({ products, events, cart, onReserve, timeWindow }) => {
               <Th k="loc">מיקום</Th>
               <Th k="stock" style={{ textAlign: 'center' }}>מלאי</Th>
               <Th k="avail" style={{ textAlign: 'center' }}>זמין</Th>
+              <Th k="rentalPrice" style={{ textAlign: 'center' }}>השכרה ₪</Th>
               <th>משתחרר</th>
               <th style={{ width: 60 }}></th>
             </tr>
@@ -93,6 +94,9 @@ const InventoryTable = ({ products, events, cart, onReserve, timeWindow }) => {
                   <td className="nums">{locStr(p.location)}</td>
                   <td className="nums" style={{ textAlign: 'center' }}>{p.stock}</td>
                   <td className="nums" style={{ textAlign: 'center', fontWeight: 700, color: avail <= 0 ? 'var(--bad)' : 'inherit' }}>{avail}</td>
+                  <td className="nums" style={{ textAlign: 'center', color: p.rentalPrice ? 'var(--ink)' : 'var(--ink-4)' }}>
+                    {p.rentalPrice ? `₪${p.rentalPrice.toLocaleString()}` : '—'}
+                  </td>
                   <td className="nums" style={{ color: 'var(--ink-3)', fontSize: 11 }}>{rel ? fmtDateShort(rel) : '—'}</td>
                   <td>
                     <button className={`btn btn-sm ${inCart ? 'btn-primary' : 'btn-ghost'}`}

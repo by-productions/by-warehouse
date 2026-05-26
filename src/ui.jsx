@@ -17,6 +17,69 @@ const fmtDateShort = (iso) => {
 const locStr = (loc) => `${loc.zone}-${loc.row}-${loc.shelf}`;
 const catOf = (id) => window.WarehouseData.CATEGORIES.find(c => c.id === id);
 const productOf = (id) => (window.__WH_PRODUCTS || window.WarehouseData.PRODUCTS).find(p => p.id === id);
+const clientOf = (id) => (window.__WH_CLIENTS || window.WarehouseData.CLIENTS).find(c => c.id === id);
+
+// ============================================================
+// Event schema migration
+// Old: setup/event/dismantle each had { date, time } or
+//      event: { date, startTime, endTime }; contacts was an array; accent was a string.
+// New: setup/event/dismantle each have { startDate, endDate, startTime, endTime };
+//      event also has skipped:bool; contacts is { client, producer, suppliers[] };
+//      clientId replaces accent; productionTasks added.
+// migrateEvent leaves new events untouched and upgrades old ones in place.
+// ============================================================
+function migrateEvent(ev) {
+  if (!ev) return ev;
+  const isOldPhase = (p) => p && (p.date !== undefined) && p.startDate === undefined;
+  const upgradePhase = (p, kind) => {
+    if (!p) return { startDate: '', endDate: '', startTime: '', endTime: '' };
+    if (!isOldPhase(p)) return { skipped: false, ...p };
+    if (kind === 'event') {
+      return {
+        startDate: p.date || '', endDate: p.date || '',
+        startTime: p.startTime || '', endTime: p.endTime || '',
+        skipped: false,
+      };
+    }
+    return {
+      startDate: p.date || '', endDate: p.date || '',
+      startTime: p.time || '', endTime: p.time || '',
+    };
+  };
+  const upgradeContacts = (c) => {
+    if (!c) return { client: { name: '', role: '', phone: '' }, producer: { name: '', role: '', phone: '' }, suppliers: [] };
+    if (!Array.isArray(c)) {
+      return {
+        client: c.client || { name: '', role: '', phone: '' },
+        producer: c.producer || { name: '', role: '', phone: '' },
+        suppliers: c.suppliers || [],
+      };
+    }
+    // Heuristic: first contact → client, second → producer, rest → suppliers
+    const stripNotes = ({ name, role, phone }) => ({ name: name || '', role: role || '', phone: phone || '' });
+    return {
+      client:   c[0] ? stripNotes(c[0]) : { name: '', role: '', phone: '' },
+      producer: c[1] ? stripNotes(c[1]) : { name: '', role: '', phone: '' },
+      suppliers: c.slice(2).map(stripNotes),
+    };
+  };
+  return {
+    ...ev,
+    setup:     upgradePhase(ev.setup, 'setup'),
+    event:     upgradePhase(ev.event, 'event'),
+    dismantle: upgradePhase(ev.dismantle, 'dismantle'),
+    contacts:  upgradeContacts(ev.contacts),
+    clientId:  ev.clientId || null,
+    productionTasks: ev.productionTasks || [],
+    items:     ev.items || [],
+    workers:   ev.workers || [],
+  };
+}
+function migrateEvents(arr) { return (arr || []).map(migrateEvent); }
+
+// Convenience accessors (work on migrated events)
+const eventHoldStart = (ev) => ev.setup?.startDate || ev.event?.startDate || ev.setup?.date || ev.event?.date;
+const eventHoldEnd   = (ev) => ev.dismantle?.endDate || ev.dismantle?.startDate || ev.event?.endDate || ev.event?.startDate || ev.dismantle?.date || ev.event?.date;
 
 // Recompute `reserved` on each product by summing qty across all events whose
 // holding window contains today (i.e. setup.date <= today <= dismantle.date).
@@ -26,11 +89,11 @@ function recomputeReserved(products, events) {
   const today = new Date().toISOString().slice(0, 10);
   const sums = {};
   events.forEach(ev => {
-    const s = ev.setup?.date || ev.event?.date;
-    const e = ev.dismantle?.date || ev.event?.date;
+    const s = eventHoldStart(ev);
+    const e = eventHoldEnd(ev);
     if (!s || !e) return;
     if (today < s || today > e) return;
-    ev.items.forEach(it => { sums[it.id] = (sums[it.id] || 0) + it.qty; });
+    (ev.items || []).forEach(it => { sums[it.id] = (sums[it.id] || 0) + it.qty; });
   });
   return products.map(p => ({ ...p, reserved: sums[p.id] || 0 }));
 }
@@ -55,11 +118,11 @@ function reservedInWindow(events, productId, fromISO, toISO) {
   const T = toISO || '9999-12-31';
   let total = 0;
   events.forEach(ev => {
-    const s = ev.setup?.date || ev.event?.date;
-    const e = ev.dismantle?.date || ev.event?.date;
+    const s = eventHoldStart(ev);
+    const e = eventHoldEnd(ev);
     if (!s || !e) return;
     if (!overlaps(F, T, s, e)) return;
-    const it = ev.items.find(i => i.id === productId);
+    const it = (ev.items || []).find(i => i.id === productId);
     if (it) total += it.qty;
   });
   return total;
@@ -72,8 +135,8 @@ function productAvailInWindow(product, events, fromISO, toISO) {
 function nextRelease(product, events) {
   const today = new Date().toISOString().slice(0, 10);
   const rels = events
-    .filter(ev => ev.items.some(i => i.id === product.id))
-    .map(ev => ev.dismantle?.date || ev.event?.date)
+    .filter(ev => (ev.items || []).some(i => i.id === product.id))
+    .map(ev => eventHoldEnd(ev))
     .filter(d => d && d >= today)
     .sort();
   return rels[0] || null;
@@ -126,32 +189,67 @@ function toUtcStamp(dateStr, timeStr) {
     + pad(dt.getUTCDate())
     + 'T' + pad(dt.getUTCHours()) + pad(dt.getUTCMinutes()) + '00Z';
 }
+// Pull a contacts array (for legacy code paths) out of the structured contacts object
+function contactsArray(event) {
+  const c = event.contacts;
+  if (!c) return [];
+  if (Array.isArray(c)) return c;
+  const out = [];
+  if (c.client && (c.client.name || c.client.phone)) out.push({ ...c.client, _kind: 'לקוח' });
+  if (c.producer && (c.producer.name || c.producer.phone)) out.push({ ...c.producer, _kind: 'מפיק/ה' });
+  (c.suppliers || []).forEach(s => { if (s.name || s.phone) out.push({ ...s, _kind: 'ספק' }); });
+  return out;
+}
+
+// Pull the calendar window: prefers event phase, falls back to setup→dismantle for booth-only timelines
+function calendarWindow(event) {
+  const ev = event.event || {};
+  if (!ev.skipped && (ev.startDate || ev.date)) {
+    return {
+      startDate: ev.startDate || ev.date,
+      endDate:   ev.endDate   || ev.startDate || ev.date,
+      startTime: ev.startTime || '',
+      endTime:   ev.endTime   || ev.startTime || '',
+    };
+  }
+  const su = event.setup || {};
+  const dm = event.dismantle || {};
+  return {
+    startDate: su.startDate || su.date || '',
+    endDate:   dm.endDate || dm.startDate || dm.date || su.endDate || su.startDate || su.date || '',
+    startTime: su.startTime || su.time || '',
+    endTime:   dm.endTime || dm.time || su.endTime || su.time || '',
+  };
+}
+
 function buildIcs(event) {
-  // End time might cross midnight: if endTime < startTime, treat as next day
-  const evStart = toUtcStamp(event.event.date, event.event.startTime);
-  let endDate = event.event.date;
-  if (event.event.endTime && event.event.endTime < event.event.startTime) {
-    const d = new Date(event.event.date);
+  const win = calendarWindow(event);
+  const evStart = toUtcStamp(win.startDate, win.startTime);
+  let endDate = win.endDate || win.startDate;
+  if (win.endTime && win.startTime && win.endTime < win.startTime && endDate === win.startDate) {
+    const d = new Date(win.startDate);
     d.setDate(d.getDate() + 1);
     endDate = d.toISOString().slice(0, 10);
   }
-  const evEnd = toUtcStamp(endDate, event.event.endTime || event.event.startTime);
+  const evEnd = toUtcStamp(endDate, win.endTime || win.startTime);
   const now = toUtcStamp(new Date().toISOString().slice(0, 10), '00:00');
 
   const esc = (s) => (s || '').replace(/\\/g, '\\\\').replace(/,/g, '\\,').replace(/;/g, '\\;').replace(/\n/g, '\\n');
 
-  const primary = (event.contacts && event.contacts[0]) || event.contact || {};
+  const fmtPhase = (label, p) => p && (p.startDate || p.date)
+    ? `${label}: ${(p.startDate || p.date)}${p.endDate && p.endDate !== p.startDate ? `→${p.endDate}` : ''} · ${(p.startTime || p.time || '')}${p.endTime ? '–' + p.endTime : ''}`
+    : '';
+  const contacts = contactsArray(event);
   const desc = [
     event.so ? `SO: ${event.so}` : '',
     event.type ? `סוג: ${event.type === 'booth' ? 'ביתן' : 'אירוע הפקה'}` : '',
-    `הקמה: ${event.setup.date || ''} ${event.setup.time || ''}`,
-    `אירוע: ${event.event.date || ''} ${event.event.startTime || ''}${event.event.endTime ? '–' + event.event.endTime : ''}`,
-    `פירוק: ${event.dismantle.date || ''} ${event.dismantle.time || ''}`,
+    fmtPhase('הקמה',  event.setup),
+    event.event?.skipped ? '' : fmtPhase('אירוע', event.event),
+    fmtPhase('פירוק', event.dismantle),
     '',
-    ...(event.contacts || [primary]).filter(c => c.name || c.phone).map((c, i) =>
-      `קשר ${i + 1}: ${c.name || ''} · ${c.role || ''} · ${c.phone || ''}`),
+    ...contacts.map((c, i) => `${c._kind || 'קשר'} ${i + 1}: ${c.name || ''} · ${c.role || ''} · ${c.phone || ''}`),
     '',
-    `צוות: ${(event.workers || []).join(', ')}`,
+    `צוות תפעול: ${(event.workers || []).join(', ')}`,
   ].filter(Boolean).join('\n');
 
   return [
@@ -191,23 +289,27 @@ function googleCalendarUrl(event) {
     if (!date) return '';
     return date.replace(/-/g, '') + (time ? 'T' + time.replace(':', '') + '00' : '');
   };
-  let endDate = event.event.date;
-  if (event.event.endTime && event.event.endTime < event.event.startTime) {
-    const d = new Date(event.event.date);
+  const win = calendarWindow(event);
+  let endDate = win.endDate || win.startDate;
+  if (win.endTime && win.startTime && win.endTime < win.startTime && endDate === win.startDate) {
+    const d = new Date(win.startDate);
     d.setDate(d.getDate() + 1);
     endDate = d.toISOString().slice(0, 10);
   }
-  const dates = `${dt(event.event.date, event.event.startTime)}/${dt(endDate, event.event.endTime || event.event.startTime)}`;
-  const primary = (event.contacts && event.contacts[0]) || event.contact || {};
+  const dates = `${dt(win.startDate, win.startTime)}/${dt(endDate, win.endTime || win.startTime)}`;
+
+  const fmtPhase = (label, p) => p && (p.startDate || p.date)
+    ? `${label}: ${(p.startDate || p.date)}${p.endDate && p.endDate !== p.startDate ? `→${p.endDate}` : ''} · ${(p.startTime || p.time || '')}${p.endTime ? '–' + p.endTime : ''}`
+    : '';
+  const contacts = contactsArray(event);
   const details = [
     event.so ? `SO: ${event.so}` : '',
     event.type ? `סוג: ${event.type === 'booth' ? 'ביתן' : 'אירוע הפקה'}` : '',
-    `הקמה: ${event.setup.date || ''} ${event.setup.time || ''}`,
-    `אירוע: ${event.event.date || ''} ${event.event.startTime || ''}${event.event.endTime ? '–' + event.event.endTime : ''}`,
-    `פירוק: ${event.dismantle.date || ''} ${event.dismantle.time || ''}`,
+    fmtPhase('הקמה',  event.setup),
+    event.event?.skipped ? '' : fmtPhase('אירוע', event.event),
+    fmtPhase('פירוק', event.dismantle),
     '',
-    ...(event.contacts || [primary]).filter(c => c.name || c.phone).map((c, i) =>
-      `קשר ${i + 1}: ${c.name || ''} · ${c.role || ''} · ${c.phone || ''}`),
+    ...contacts.map((c, i) => `${c._kind || 'קשר'} ${i + 1}: ${c.name || ''} · ${c.role || ''} · ${c.phone || ''}`),
   ].filter(Boolean).join('\n');
   const params = new URLSearchParams({
     text: event.name,
@@ -317,8 +419,9 @@ const ImagePicker = ({ value, onChange, aspect = '16/9', label = 'צרפו תמ�
 );
 
 window.WHui = {
-  fmtDate, fmtDateShort, locStr, catOf, productOf, availStatus,
+  fmtDate, fmtDateShort, locStr, catOf, productOf, clientOf, availStatus,
   reservedInWindow, productAvailInWindow, nextRelease, recomputeReserved,
+  migrateEvent, migrateEvents, eventHoldStart, eventHoldEnd, contactsArray, calendarWindow,
   pickImage, buildIcs, downloadIcs, googleCalendarUrl,
   CategoryChip, QtyStepper, Toast, Empty, Modal, ImagePicker,
 };

@@ -36,10 +36,39 @@ function tintedSvg(text, accent) {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
+// ============================================================
+// Clients — managed list with brand color per client
+// New events get a clientId; the card/event color is derived from the client.
+// ============================================================
+const CLIENTS = [
+  { id: 'cl_abbott',      name: 'אבוט',                 color: '#8bc34a' },
+  { id: 'cl_eli_lily_mg', name: "אלי לילי מונג'רו",      color: '#b76ad6' },
+  { id: 'cl_eli_lily_ks', name: 'אלי לילי קיסונלה',      color: '#7b5cff' },
+  { id: 'cl_doctor',      name: 'אסף הרופא',             color: '#4a9eff' },
+  { id: 'cl_bayer',       name: 'באייר',                 color: '#1ac6c6' },
+  { id: 'cl_gilead',      name: 'גיליאד',                color: '#06a77d' },
+  { id: 'cl_teva',        name: 'טבע',                   color: '#3d5a80' },
+  { id: 'cl_tesla',       name: 'טסלה',                  color: '#e63946' },
+  { id: 'cl_lowenstein',  name: 'לוונשטיין תעשיות',      color: '#ff8a4c' },
+  { id: 'cl_madison',     name: 'מדיסון',                color: '#ff6b9d' },
+  { id: 'cl_mobileye',    name: 'מובילאיי',              color: '#1d7a4b' },
+  { id: 'cl_mimad',       name: 'מימד',                  color: '#ffd93d' },
+  { id: 'cl_meavadot',    name: 'מעבדות חי',             color: '#f4a261' },
+  { id: 'cl_novartis',    name: 'נוברטיס',               color: '#0b7a7a' },
+  { id: 'cl_sanofi',      name: 'סאנופי',                color: '#a5d8ff' },
+  { id: 'cl_padagis',     name: 'פאדאגיס',               color: '#ffe5f0' },
+  { id: 'cl_factory54',   name: 'פקטורי 54',             color: '#1a1614' },
+  { id: 'cl_tzamel',      name: 'צמל',                   color: '#ff2d87' },
+  { id: 'cl_rosh',        name: 'רוש',                   color: '#c2185b' },
+  { id: 'cl_rashut',      name: 'רשות החדשנות',          color: '#5e72e4' },
+  { id: 'cl_misc',        name: 'שונות',                 color: '#857f77' },
+  { id: 'cl_gsk',         name: 'GSK',                   color: '#f59e0b' },
+];
+
 // Helper: assign sequential SKUs per category, auto-place in warehouse
 let _skuCounters = {};
 let _locCounters = {};
-function mk(cat, name, stock, notes = '', dims = {}) {
+function mk(cat, name, stock, notes = '', dims = {}, rentalPrice = 0) {
   _skuCounters[cat] = (_skuCounters[cat] || 0) + 1;
   const prefix = cat.slice(0, 2).toUpperCase();
   const id = `${prefix}-${String(_skuCounters[cat]).padStart(3, '0')}`;
@@ -55,6 +84,7 @@ function mk(cat, name, stock, notes = '', dims = {}) {
     stock, reserved: 0,
     location: { zone, row, shelf },
     dims: { w: dims.w || 0, h: dims.h || 0, d: dims.d || 0 },
+    rentalPrice,
     notes,
     image: tintedSvg(name.slice(0, 16), CAT_COLORS[cat]),
   };
@@ -240,28 +270,41 @@ const PRODUCTS = [
   mk('gear', 'מעמד דגלים סיניים', 8, 'מעמד דגלים סיניים'),
 ];
 
-// Sample events (SO + type + contacts)
+// ============================================================
+// Events — new schema (2026-05):
+// - clientId (links to CLIENTS) → drives card color
+// - setup/event/dismantle each have: startDate, endDate, startTime, endTime
+// - event can be skipped (skipped:true) for booth-only timelines
+// - contacts is structured: { client, producer, suppliers: [] }
+// - productionTasks: tracking of print/carpentry jobs per event
+// Old single-date events are still supported via migrateEvent() in ui.jsx.
+// ============================================================
 const EVENTS = [
   {
     id: 'EV-2026-041',
     type: 'production',
     so: 'SO-24831',
     name: 'חתונה גלית ואיתי',
-    setup:     { date: '2026-05-02', time: '10:00' },
-    event:     { date: '2026-05-02', startTime: '19:00', endTime: '02:00' },
-    dismantle: { date: '2026-05-03', time: '09:00' },
+    clientId: 'cl_misc',
+    setup:     { startDate: '2026-05-02', endDate: '2026-05-02', startTime: '10:00', endTime: '17:00' },
+    event:     { startDate: '2026-05-02', endDate: '2026-05-02', startTime: '19:00', endTime: '02:00', skipped: false },
+    dismantle: { startDate: '2026-05-03', endDate: '2026-05-03', startTime: '09:00', endTime: '12:00' },
     location: 'אחוזת דקל, מושב עמיקם',
-    contacts: [
-      { name: 'דניאל אשר', role: 'מפיק ראשי', phone: '054-8810392', notes: 'להגיע משער המטעים · מפתחות אצל השומר' },
-      { name: 'גלית כהן', role: 'כלה', phone: '050-2234455', notes: '' },
-    ],
+    contacts: {
+      client:   { name: 'גלית כהן', role: 'כלה', phone: '050-2234455' },
+      producer: { name: 'דניאל אשר', role: 'מפיק ראשי', phone: '054-8810392' },
+      suppliers: [],
+    },
     workers: ['תומר', 'עדי', "ז'אק", 'רון'],
     items: [
       { id: 'CA-001', qty: 4 },
       { id: 'SO-001', qty: 1 },
       { id: 'TL-007', qty: 6 },
     ],
-    accent: 'pink',
+    productionTasks: [
+      { id: 'pt1', title: 'באנר ראשי לחופה', type: 'print', sentDate: '2026-04-15', deadline: '2026-04-26', received: true },
+      { id: 'pt2', title: 'שלטי שולחנות (12 יח׳)', type: 'print', sentDate: '2026-04-20', deadline: '2026-04-28', received: false },
+    ],
     image: null,
   },
   {
@@ -269,20 +312,27 @@ const EVENTS = [
     type: 'booth',
     so: 'SO-24855',
     name: 'ביתן קריאייטיב · תערוכת DMEXCO',
-    setup:     { date: '2026-05-08', time: '13:00' },
-    event:     { date: '2026-05-08', startTime: '16:30', endTime: '22:00' },
-    dismantle: { date: '2026-05-08', time: '23:00' },
+    clientId: 'cl_factory54',
+    setup:     { startDate: '2026-05-08', endDate: '2026-05-08', startTime: '13:00', endTime: '16:00' },
+    event:     { startDate: '2026-05-08', endDate: '2026-05-08', startTime: '16:30', endTime: '22:00', skipped: false },
+    dismantle: { startDate: '2026-05-08', endDate: '2026-05-08', startTime: '23:00', endTime: '01:00' },
     location: 'אקספו תל אביב · ביתן 4, מקום B-17',
-    contacts: [
-      { name: 'מיכל לוי', role: 'מנהלת שיווק', phone: '052-4410287', notes: 'העמסת ציוד ממעלית שירות בלבד' },
-    ],
+    contacts: {
+      client:   { name: 'מיכל לוי', role: 'מנהלת שיווק', phone: '052-4410287' },
+      producer: { name: '', role: '', phone: '' },
+      suppliers: [
+        { name: 'אורי דפוס', role: 'דפוס באנרים', phone: '054-7711230' },
+      ],
+    },
     workers: ['תומר', 'עדי'],
     items: [
       { id: 'PO-001', qty: 2 },
       { id: 'DI-009', qty: 4 },
       { id: 'ME-006', qty: 1 },
     ],
-    accent: 'teal',
+    productionTasks: [
+      { id: 'pt3', title: 'מיתוג קוביות מוארות', type: 'print', sentDate: '2026-04-22', deadline: '2026-05-03', received: false },
+    ],
     image: null,
   },
   {
@@ -290,21 +340,28 @@ const EVENTS = [
     type: 'booth',
     so: 'SO-24912',
     name: 'ביתן גוגל קלאוד · כנס InfoTech',
-    setup:     { date: '2026-06-18', time: '08:00' },
-    event:     { date: '2026-06-19', startTime: '09:00', endTime: '18:00' },
-    dismantle: { date: '2026-06-19', time: '19:30' },
+    clientId: 'cl_misc',
+    setup:     { startDate: '2026-06-18', endDate: '2026-06-18', startTime: '08:00', endTime: '20:00' },
+    event:     { startDate: '2026-06-19', endDate: '2026-06-19', startTime: '09:00', endTime: '18:00', skipped: false },
+    dismantle: { startDate: '2026-06-19', endDate: '2026-06-19', startTime: '19:30', endTime: '23:00' },
     location: 'בנייני האומה, ירושלים · אולם 2, ביתן D-08',
-    contacts: [
-      { name: 'שירלי אברהם', role: 'מנהלת אירועים', phone: '052-8811224', notes: 'כרטיסי כניסה מחכים בקבלה' },
-      { name: 'אלון גזית', role: 'מנהל טכני', phone: '054-2209912', notes: 'חיבורי חשמל מתחת לרצפה' },
-    ],
+    contacts: {
+      client:   { name: 'שירלי אברהם', role: 'מנהלת אירועים', phone: '052-8811224' },
+      producer: { name: 'אלון גזית', role: 'מנהל טכני', phone: '054-2209912' },
+      suppliers: [
+        { name: 'נגריית סטודיו 12', role: 'בינוי דלפק', phone: '052-9988740' },
+      ],
+    },
     workers: ['תומר', "ז'אק"],
     items: [
       { id: 'CO-001', qty: 1 },
       { id: 'DI-009', qty: 6 },
       { id: 'DE-004', qty: 2 },
     ],
-    accent: 'teal',
+    productionTasks: [
+      { id: 'pt4', title: 'דלפק קבלה ממותג', type: 'carpentry', sentDate: '2026-05-20', deadline: '2026-06-12', received: false },
+      { id: 'pt5', title: 'מדבקות זכוכית', type: 'print', sentDate: '2026-05-25', deadline: '2026-06-15', received: false },
+    ],
     image: null,
   },
 ];
@@ -316,4 +373,4 @@ const HISTORY_ITEMS = [
   ['ME-003', 36], ['DE-004', 24], ['GE-011', 62],
 ].map(([id, count]) => ({ id, count }));
 
-window.WarehouseData = { CATEGORIES, ZONES, PRODUCTS, EVENTS, HISTORY_ITEMS };
+window.WarehouseData = { CATEGORIES, ZONES, PRODUCTS, EVENTS, HISTORY_ITEMS, CLIENTS };

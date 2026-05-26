@@ -1061,3 +1061,153 @@ button { cursor: pointer; background: none; border: none; padding: 0; }
   flex-shrink: 0;
   filter: brightness(0);
 }
+
+/* ============================================
+   2026-05 redesign — clients, dates, contacts, tracking
+   ============================================ */
+
+/* Client chip (used in event cards & briefing) */
+.client-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #fff;
+  border-radius: 6px;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.15);
+  border: 1px solid rgba(0,0,0,0.08);
+}
+
+/* Event card uses client color as left stripe (overrides legacy accent classes) */
+.event-card[style*="--client-color"]::before {
+  background: var(--client-color);
+}
+
+/* Phase editor grid (date range + time range) */
+.phase-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 8px;
+}
+@media (max-width: 700px) {
+  .phase-grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* Compact contacts (client + producer side-by-side) */
+.contact-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+@media (max-width: 700px) {
+  .contact-row { grid-template-columns: 1fr; }
+}
+.contact-card {
+  padding: 12px;
+  background: var(--surface-2);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+.contact-card .contact-kind {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-2);
+  margin-bottom: 8px;
+  letter-spacing: 0.04em;
+}
+.contact-block.compact {
+  padding: 10px;
+}
+
+/* Production task row (in event editor) */
+.task-row {
+  display: grid;
+  grid-template-columns: 30px 1fr 30px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+.task-check {
+  width: 24px; height: 24px;
+  border-radius: 6px;
+  border: 2px solid var(--border-strong);
+  background: #fff;
+  color: var(--ok);
+  font-weight: 700;
+  font-size: 14px;
+  display: grid; place-items: center;
+  transition: all 0.15s;
+}
+.task-check:hover { border-color: var(--ink); }
+.task-check.checked {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: #fff;
+}
+.task-fields { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.task-title {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  outline: none;
+  background: #fff;
+}
+.task-title:focus { border-color: var(--pink); box-shadow: 0 0 0 2px var(--pink-soft); }
+.task-meta {
+  display: flex; gap: 8px; align-items: center;
+  font-size: 11px; color: var(--ink-3);
+  flex-wrap: wrap;
+}
+.task-meta label { display: inline-flex; gap: 4px; align-items: center; }
+.task-meta select, .task-meta input {
+  padding: 4px 6px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+}
+
+/* Tracking tab rows */
+.tbl tr.task-tr.done td { opacity: 0.55; }
+.tbl tr.task-tr.overdue td { background: color-mix(in oklab, var(--bad) 6%, white); }
+.tbl tr.task-tr.overdue:hover td { background: color-mix(in oklab, var(--bad) 12%, white); }
+
+/* Clients manager */
+.clients-list { display: flex; flex-direction: column; gap: 6px; max-height: 360px; overflow-y: auto; }
+.client-row {
+  display: grid;
+  grid-template-columns: 36px 1fr auto 36px;
+  align-items: center;
+  gap: 10px;
+  padding: 6px;
+  background: var(--surface-2);
+  border-radius: 8px;
+}
+.client-color-picker {
+  width: 36px; height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 2px;
+  background: #fff;
+}
+.client-name-input {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  outline: none;
+}
+.client-name-input:focus { border-color: var(--pink); box-shadow: 0 0 0 2px var(--pink-soft); }

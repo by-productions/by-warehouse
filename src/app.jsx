@@ -1,10 +1,19 @@
 // Main app shell
 const App = () => {
-  const { PRODUCTS, EVENTS } = window.WarehouseData;
-  const { Toast, Empty, Modal, QtyStepper, locStr, catOf, productOf, fmtDate, recomputeReserved } = window.WHui;
+  const { PRODUCTS, EVENTS, CLIENTS } = window.WarehouseData;
+  const { Toast, Empty, Modal, QtyStepper, locStr, catOf, productOf, clientOf, fmtDate, fmtDateShort,
+    recomputeReserved, migrateEvent, migrateEvents, eventHoldStart, eventHoldEnd, contactsArray } = window.WHui;
 
-  const [products, setProducts] = useState(() => recomputeReserved(PRODUCTS, EVENTS));
-  const [events, setEvents] = useState(EVENTS);
+  const initialEvents = useMemo(() => migrateEvents(EVENTS), []);
+  const [products, setProducts] = useState(() => recomputeReserved(PRODUCTS, initialEvents));
+  const [events, setEvents] = useState(initialEvents);
+  const [clients, setClients] = useState(CLIENTS);
+  const [showClientsManager, setShowClientsManager] = useState(false);
+
+  // Aggregate tracking tasks count for nav badge
+  const openTrackingCount = useMemo(() =>
+    events.reduce((s, ev) => s + (ev.productionTasks || []).filter(t => !t.received).length, 0),
+    [events]);
 
   // Load from Sheet on mount (overrides local mock data if Sheet has data)
   useEffect(() => {
@@ -13,9 +22,9 @@ const App = () => {
       try {
         const data = await window.SheetsAPI.fetchAll();
         if (data.products && data.products.length) {
-          const evs = (data.events && data.events.length) ? data.events : EVENTS;
+          const evs = (data.events && data.events.length) ? migrateEvents(data.events) : initialEvents;
           setProducts(recomputeReserved(data.products, evs));
-          if (data.events && data.events.length) setEvents(data.events);
+          if (data.events && data.events.length) setEvents(evs);
         }
       } catch (err) {
         console.warn('Sheet load failed:', err.message);
@@ -54,13 +63,15 @@ const App = () => {
   };
 
   const importFromSheet = (data) => {
-    if (data.products && data.products.length) setProducts(recomputeReserved(data.products, data.events || events));
-    if (data.events && data.events.length) setEvents(data.events);
+    const evs = data.events && data.events.length ? migrateEvents(data.events) : events;
+    if (data.products && data.products.length) setProducts(recomputeReserved(data.products, evs));
+    if (data.events && data.events.length) setEvents(evs);
     showToast('הנתונים נטענו מהגיליון');
   };
 
-  // Expose products to helpers
+  // Expose products + clients to helpers
   useEffect(() => { window.__WH_PRODUCTS = products; }, [products]);
+  useEffect(() => { window.__WH_CLIENTS = clients; }, [clients]);
 
   const showToast = (msg) => {
     setToast(msg);
@@ -143,17 +154,19 @@ const App = () => {
   };
 
   const navItems = [
-    { id: 'catalog', label: 'קטלוג מוצרים', icon: 'grid', count: products.length },
-    { id: 'map',     label: 'מפת מחסן',    icon: 'map'  },
-    { id: 'events',  label: 'אירועים',     icon: 'calendar', count: events.length },
-    { id: 'reports', label: 'דוחות',       icon: 'chart' },
+    { id: 'catalog',  label: 'קטלוג מוצרים', icon: 'grid', count: products.length },
+    { id: 'map',      label: 'מפת מחסן',    icon: 'map'  },
+    { id: 'events',   label: 'אירועים',     icon: 'calendar', count: events.length },
+    { id: 'tracking', label: 'הפקה ומעקב',  icon: 'note', count: openTrackingCount || null },
+    { id: 'reports',  label: 'דוחות',       icon: 'chart' },
   ];
 
-  const pageTitle = { catalog: 'קטלוג מוצרים', map: 'מפת מחסן', events: 'אירועים', reports: 'דוחות וסטטיסטיקות' }[tab];
+  const pageTitle = { catalog: 'קטלוג מוצרים', map: 'מפת מחסן', events: 'אירועים', tracking: 'הפקה ומעקב', reports: 'דוחות וסטטיסטיקות' }[tab];
   const pageSub = {
     catalog: `${products.length} סוגי פריטים · ${products.reduce((s, p) => s + p.stock, 0)} יחידות במלאי`,
     map: 'תצוגה חזותית · 3 אזורים',
-    events: `${events.length} אירועים · ${events.reduce((s, e) => s + e.items.reduce((n, i) => n + i.qty, 0), 0)} פריטים משוריינים`,
+    events: `${events.length} אירועים · ${events.reduce((s, e) => s + (e.items || []).reduce((n, i) => n + i.qty, 0), 0)} פריטים משוריינים`,
+    tracking: `${openTrackingCount} משימות פתוחות · מעקב דפוס ונגרות`,
     reports: 'תמונת מצב כללית',
   }[tab];
 
@@ -183,6 +196,12 @@ const App = () => {
           ))}
         </nav>
         <div className="side-foot">
+          <button className="btn btn-ghost" style={{ width: '100%', justifyContent: 'flex-start', marginBottom: 8 }}
+            onClick={() => setShowClientsManager(true)}>
+            <Icon name="grid" size={14} />
+            <span style={{ flex: 1, textAlign: 'start' }}>ניהול לקוחות</span>
+            <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: 'var(--ink-3)' }}>{clients.length}</span>
+          </button>
           <button className="btn btn-ghost" style={{ width: '100%', justifyContent: 'flex-start', marginBottom: 12 }}
             onClick={() => setShowSettings(true)}>
             <Icon name="settings" size={14} />
@@ -223,10 +242,15 @@ const App = () => {
             </div>
           )}
 
-          <button className={`cart-chip ${cartCount === 0 ? 'empty' : ''}`} onClick={() => setCartOpen(true)}>
-            <Icon name="cart" size={16} /> עגלת שריון
-            {cartCount > 0 && <span className="count">{cartCount}</span>}
-          </button>
+          <div style={{ marginInlineStart: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button className="btn btn-dark" onClick={() => { setEditingEvent(null); setShowEditor(true); }}>
+              <Icon name="plus" size={14} /> אירוע חדש
+            </button>
+            <button className={`cart-chip ${cartCount === 0 ? 'empty' : ''}`} onClick={() => setCartOpen(true)} style={{ marginInlineStart: 0 }}>
+              <Icon name="cart" size={16} /> שריון מהקטלוג
+              {cartCount > 0 && <span className="count">{cartCount}</span>}
+            </button>
+          </div>
         </header>
 
         <section className="content">
@@ -242,12 +266,24 @@ const App = () => {
             <window.WarehouseMap products={products} onPickProduct={(p) => setProductDetail(p)} />
           )}
           {tab === 'events' && !showBriefing && (
-            <window.Events events={events} products={products}
+            <window.Events events={events} products={products} clients={clients}
               onOpenEvent={openEvent}
               onCreateEvent={() => { setEditingEvent(null); setShowEditor(true); }} />
           )}
           {tab === 'events' && showBriefing && (
             <window.Briefing event={showBriefing} onBack={() => setShowBriefing(null)} />
+          )}
+          {tab === 'tracking' && (
+            <window.Tracking events={events} clients={clients}
+              onUpdateTask={(eventId, taskId, patch) => {
+                setEvents(es => es.map(ev => ev.id !== eventId ? ev : ({
+                  ...ev,
+                  productionTasks: (ev.productionTasks || []).map(t => t.id === taskId ? { ...t, ...patch } : t),
+                })));
+                const ev = events.find(e => e.id === eventId);
+                if (ev) syncToSheet('upsert_event', { ...ev, productionTasks: ev.productionTasks.map(t => t.id === taskId ? { ...t, ...patch } : t) });
+              }}
+              onOpenEvent={openEvent} />
           )}
           {tab === 'reports' && (
             <window.Reports products={products} events={events} />
@@ -324,6 +360,7 @@ const App = () => {
         <window.EventEditor event={editingEvent}
           cartItems={editingEvent ? null : cartItems}
           products={products}
+          clients={clients}
           onClose={() => { setShowEditor(false); setEditingEvent(null); }}
           onSave={saveEvent} />
       )}
@@ -336,9 +373,23 @@ const App = () => {
       )}
 
       {/* Event detail */}
-      {viewingEvent && (
-        <Modal title={viewingEvent.name}
-          subtitle={`${fmtDate(viewingEvent.event.date)} · ${viewingEvent.event.startTime}`}
+      {viewingEvent && (() => {
+        const client = clientOf(viewingEvent.clientId);
+        const evWin = viewingEvent.event;
+        const fmtPhase = (p) => {
+          if (!p || !p.startDate) return '—';
+          const dateRange = p.endDate && p.endDate !== p.startDate
+            ? `${fmtDateShort(p.startDate)} → ${fmtDateShort(p.endDate)}`
+            : fmtDate(p.startDate);
+          const timeRange = p.startTime ? `${p.startTime}${p.endTime ? `–${p.endTime}` : ''}` : '';
+          return `${dateRange}${timeRange ? ` · ${timeRange}` : ''}`;
+        };
+        const subtitle = evWin?.skipped
+          ? `${fmtDate(eventHoldStart(viewingEvent))} (ללא יום אירוע)`
+          : `${fmtDate(evWin?.startDate)}${evWin?.startTime ? ` · ${evWin.startTime}` : ''}`;
+        const allContacts = contactsArray(viewingEvent);
+        return (
+        <Modal title={viewingEvent.name} subtitle={subtitle}
           onClose={() => setViewingEvent(null)}
           footer={<>
             <button className="btn btn-ghost" onClick={() => { if (confirm('למחוק את האירוע ולשחרר את הפריטים?')) deleteEvent(viewingEvent); }}>
@@ -351,39 +402,48 @@ const App = () => {
               <Icon name="note" size={13} /> דף הנחיה
             </button>
           </>}>
-          <div className="field"><label>סוג · SO</label>
-            <div style={{ fontSize: 13, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="field"><label>סוג · לקוח · SO</label>
+            <div style={{ fontSize: 13, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <span className={`type-badge ${viewingEvent.type === 'booth' ? 'booth' : 'prod'}`}>
                 {viewingEvent.type === 'booth' ? '🏪 ביתן' : '🎉 אירוע הפקה'}
               </span>
+              {client && (
+                <span className="client-chip" style={{ background: client.color }}>{client.name}</span>
+              )}
               {viewingEvent.so && <span className="so-badge">{viewingEvent.so}</span>}
             </div>
           </div>
           <div className="field"><label>מיקום</label><div style={{ fontSize: 14 }}>{viewingEvent.location}</div></div>
           <div className="field"><label>לוחות זמנים</label>
-            <div style={{ fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.7 }}>
-              🔨 הקמה: {fmtDate(viewingEvent.setup.date)} · {viewingEvent.setup.time}<br/>
-              🎉 אירוע: {fmtDate(viewingEvent.event.date)} · {viewingEvent.event.startTime}{viewingEvent.event.endTime ? `–${viewingEvent.event.endTime}` : ''}<br/>
-              📦 פירוק: {fmtDate(viewingEvent.dismantle.date)} · {viewingEvent.dismantle.time}
+            <div style={{ fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.8 }}>
+              <div>🔨 <b>הקמה:</b> {fmtPhase(viewingEvent.setup)}</div>
+              {!evWin?.skipped && <div>🎉 <b>אירוע:</b> {fmtPhase(viewingEvent.event)}</div>}
+              <div>📦 <b>פירוק:</b> {fmtPhase(viewingEvent.dismantle)}</div>
             </div>
           </div>
-          <div className="field"><label>אנשי קשר ({(viewingEvent.contacts || []).length})</label>
-            {(viewingEvent.contacts || []).map((c, i) => (
-              <div key={i} style={{ fontSize: 13, padding: '8px 10px', background: 'var(--surface-2)', borderRadius: 8, marginBottom: i < viewingEvent.contacts.length - 1 ? 6 : 0 }}>
-                <div style={{ fontWeight: 600 }}>{c.name} {c.role && <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>· {c.role}</span>}</div>
-                <div className="mono" style={{ color: 'var(--ink-3)', fontSize: 12, marginTop: 2, direction: 'ltr', textAlign: 'right' }}>{c.phone}</div>
-                {c.notes && <div style={{ color: 'var(--ink-2)', fontSize: 12, marginTop: 4 }}>{c.notes}</div>}
+          <div className="field"><label>אנשי קשר</label>
+            {allContacts.length === 0 ? (
+              <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>לא הוזנו אנשי קשר</div>
+            ) : allContacts.map((c, i) => (
+              <div key={i} style={{ fontSize: 13, padding: '8px 10px', background: 'var(--surface-2)', borderRadius: 8, marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <div>
+                  <div style={{ fontWeight: 600 }}>
+                    <span style={{ fontSize: 10, color: 'var(--ink-3)', marginInlineEnd: 6 }}>[{c._kind || 'קשר'}]</span>
+                    {c.name || '—'} {c.role && <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>· {c.role}</span>}
+                  </div>
+                </div>
+                <div className="mono" style={{ color: 'var(--ink-3)', fontSize: 12, direction: 'ltr' }}>{c.phone || ''}</div>
               </div>
             ))}
           </div>
-          <div className="field"><label>עובדים ({viewingEvent.workers.length})</label>
+          <div className="field"><label>עובדי תפעול ({(viewingEvent.workers || []).length})</label>
             <div className="worker-chips">
-              {viewingEvent.workers.map((w, i) => <span key={i} className="worker-chip"><span className="av">{w[0]}</span>{w}</span>)}
+              {(viewingEvent.workers || []).map((w, i) => <span key={i} className="worker-chip"><span className="av">{w[0]}</span>{w}</span>)}
             </div>
           </div>
-          <div className="field"><label>פריטים ({viewingEvent.items.reduce((s, i) => s + i.qty, 0)})</label>
+          <div className="field"><label>פריטים ({(viewingEvent.items || []).reduce((s, i) => s + i.qty, 0)})</label>
             <div className="item-list">
-              {viewingEvent.items.map((it, i) => {
+              {(viewingEvent.items || []).map((it, i) => {
                 const p = productOf(it.id); if (!p) return null;
                 return (<div key={it.id} className="row">
                   <span className="idx">{String(i + 1).padStart(2, '0')}</span>
@@ -394,8 +454,27 @@ const App = () => {
               })}
             </div>
           </div>
+          {viewingEvent.productionTasks?.length > 0 && (
+            <div className="field"><label>הפקה ומעקב ({viewingEvent.productionTasks.length})</label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {viewingEvent.productionTasks.map(t => (
+                  <div key={t.id} style={{ fontSize: 12, padding: '8px 10px', background: 'var(--surface-2)', borderRadius: 8, display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                    <span style={{ fontSize: 16 }}>{t.received ? '✅' : '⏳'}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600 }}>{t.title || '—'}</div>
+                      <div style={{ color: 'var(--ink-3)' }}>
+                        {t.type === 'carpentry' ? '🪚 נגרות' : t.type === 'print' ? '📄 דפוס' : '📦 אחר'}
+                        {t.sentDate ? ` · נשלח ${fmtDateShort(t.sentDate)}` : ''}
+                        {t.deadline ? ` · דד-ליין ${fmtDateShort(t.deadline)}` : ''}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </Modal>
-      )}
+      ); })()}
 
       {/* Product detail */}
       {productDetail && (
@@ -427,6 +506,13 @@ const App = () => {
               {productDetail.dims.w} × {productDetail.dims.h} × {productDetail.dims.d}
             </div>
           </div>
+          {productDetail.rentalPrice ? (
+            <div className="field"><label>מחיר השכרה</label>
+              <div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>
+                ₪{productDetail.rentalPrice.toLocaleString()} <span style={{ fontWeight: 400, color: 'var(--ink-3)', fontSize: 12 }}>/ יחידה</span>
+              </div>
+            </div>
+          ) : null}
           {productDetail.notes && <div className="field"><label>הערות</label><div style={{ fontSize: 13 }}>{productDetail.notes}</div></div>}
         </Modal>
       )}
@@ -441,7 +527,99 @@ const App = () => {
           onImport={importFromSheet}
         />
       )}
+
+      {showClientsManager && (
+        <ClientsManager
+          clients={clients}
+          events={events}
+          onClose={() => setShowClientsManager(false)}
+          onSave={(next) => { setClients(next); showToast('רשימת הלקוחות נשמרה'); }}
+        />
+      )}
     </div>
+  );
+};
+
+// ============================================================
+// Clients Manager — add / edit / delete with color per client
+// ============================================================
+const ClientsManager = ({ clients, events, onClose, onSave }) => {
+  const { Modal } = window.WHui;
+  const [list, setList] = useState(() => clients.map(c => ({ ...c })));
+  const [newName, setNewName] = useState('');
+  const [newColor, setNewColor] = useState('#ff6b9d');
+
+  const presetColors = ['#ff2d87', '#ff6b9d', '#ff8a4c', '#ffd93d', '#8bc34a',
+    '#1ac6c6', '#06a77d', '#4a9eff', '#7b5cff', '#b76ad6',
+    '#e63946', '#3d5a80', '#0b7a7a', '#f4a261', '#1a1614', '#857f77'];
+
+  const usage = useMemo(() => {
+    const m = {};
+    events.forEach(ev => { if (ev.clientId) m[ev.clientId] = (m[ev.clientId] || 0) + 1; });
+    return m;
+  }, [events]);
+
+  const upd = (i, patch) => setList(L => L.map((c, idx) => idx === i ? { ...c, ...patch } : c));
+  const del = (i) => {
+    const c = list[i];
+    if (usage[c.id]) {
+      if (!confirm(`לקוח "${c.name}" מקושר ל-${usage[c.id]} אירועים. למחוק?`)) return;
+    }
+    setList(L => L.filter((_, idx) => idx !== i));
+  };
+  const add = () => {
+    if (!newName.trim()) return;
+    const id = `cl_${Date.now().toString(36)}`;
+    setList(L => [...L, { id, name: newName.trim(), color: newColor }]);
+    setNewName(''); setNewColor('#ff6b9d');
+  };
+
+  return (
+    <Modal title="ניהול לקוחות" subtitle="שם וצבע יחודי לכל לקוח · משמש בכרטיסי האירועים" onClose={onClose} wide
+      footer={<>
+        <button className="btn btn-ghost" onClick={onClose}>ביטול</button>
+        <button className="btn btn-primary" onClick={() => { onSave(list); onClose(); }}>
+          <Icon name="check" size={14} /> שמירה
+        </button>
+      </>}>
+      <div className="clients-list">
+        {list.map((c, i) => (
+          <div key={c.id} className="client-row">
+            <input type="color" value={c.color} onChange={(e) => upd(i, { color: e.target.value })}
+              className="client-color-picker" />
+            <input value={c.name} onChange={(e) => upd(i, { name: e.target.value })}
+              className="client-name-input" placeholder="שם לקוח" />
+            <span style={{ fontSize: 11, color: 'var(--ink-3)', minWidth: 70, textAlign: 'center' }}>
+              {usage[c.id] ? `${usage[c.id]} אירועים` : 'ללא שימוש'}
+            </span>
+            <button className="btn btn-ghost btn-sm" onClick={() => del(i)}>
+              <Icon name="trash" size={12} />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ height: 1, background: 'var(--border)', margin: '16px 0' }} />
+
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>הוספת לקוח חדש</div>
+      <div className="client-row">
+        <input type="color" value={newColor} onChange={(e) => setNewColor(e.target.value)} className="client-color-picker" />
+        <input value={newName} onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
+          className="client-name-input" placeholder="שם הלקוח החדש…" />
+        <button className="btn btn-primary btn-sm" onClick={add} disabled={!newName.trim()}>
+          <Icon name="plus" size={12} /> הוספה
+        </button>
+      </div>
+      <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+        {presetColors.map(col => (
+          <button key={col} type="button" onClick={() => setNewColor(col)}
+            style={{ width: 22, height: 22, borderRadius: 6, background: col,
+              border: newColor === col ? '2px solid var(--ink)' : '1px solid var(--border)',
+              cursor: 'pointer' }} title={col} />
+        ))}
+      </div>
+    </Modal>
   );
 };
 

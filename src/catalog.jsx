@@ -86,6 +86,11 @@ const ProductCard = ({ p, events, timeWindow, inCart, onReserve, onOpen }) => {
           <span>{p.sku}</span>
           <span><Icon name="pin" size={11} style={{ verticalAlign: '-2px' }} /> {window.WHui.locStr(p.location)}</span>
         </div>
+        {p.rentalPrice ? (
+          <div style={{ fontSize: 11, fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink-2)' }}>
+            השכרה: <b style={{ color: 'var(--ink)' }}>₪{p.rentalPrice.toLocaleString()}</b> / יח׳
+          </div>
+        ) : null}
         <div className="stock-row">
           <div className="stock-bar">
             <div className="stock-bar-fill" style={{ width: `${fillPct}%`, background: `var(--${statusCls})` }} />

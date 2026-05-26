@@ -1,8 +1,26 @@
-// Briefing — 3 days schedule + image + calendar buttons
+// Briefing — schedule (3 phases) + items + structured contacts + production tasks
 const Briefing = ({ event, onBack }) => {
   if (!event) return null;
-  const { productOf, locStr, fmtDate, downloadIcs, googleCalendarUrl } = window.WHui;
-  const totalItems = event.items.reduce((s, it) => s + it.qty, 0);
+  const { productOf, locStr, fmtDate, fmtDateShort, downloadIcs, googleCalendarUrl,
+    contactsArray, clientOf, eventHoldStart } = window.WHui;
+  const totalItems = (event.items || []).reduce((s, it) => s + it.qty, 0);
+  const client = clientOf(event.clientId);
+  const allContacts = contactsArray(event);
+
+  const phaseLine = (p) => {
+    if (!p || !p.startDate) return { date: '—', time: '' };
+    const date = p.endDate && p.endDate !== p.startDate
+      ? `${fmtDateShort(p.startDate)} → ${fmtDateShort(p.endDate)}`
+      : fmtDate(p.startDate);
+    const time = p.startTime ? `${p.startTime}${p.endTime ? `–${p.endTime}` : ''}` : '';
+    return { date, time };
+  };
+
+  const setup = phaseLine(event.setup);
+  const evPhase = phaseLine(event.event);
+  const dismantle = phaseLine(event.dismantle);
+  const eventSkipped = event.event?.skipped;
+
   return (<>
     <div className="toolbar no-print">
       <button className="btn btn-ghost" onClick={onBack}>
@@ -25,13 +43,16 @@ const Briefing = ({ event, onBack }) => {
       {event.image && (
         <div style={{ height: 200, background: `center/cover url(${event.image})` }} />
       )}
-      <div className="briefing-head">
+      <div className="briefing-head" style={client ? { borderBottom: `4px solid ${client.color}` } : undefined}>
         <div className="briefing-eyebrow">
           {event.type === 'booth' ? '🏪 ביתן · דף הנחיה לצוות' : '🎉 אירוע הפקה · דף הנחיה לצוות'}
+          {client && <span className="client-chip" style={{ background: client.color, marginInlineStart: 8 }}>{client.name}</span>}
           {event.so && <span className="so-badge-lg">{event.so}</span>}
         </div>
         <h1 className="briefing-title">{event.name}</h1>
-        <div className="briefing-date">{fmtDate(event.event.date)} · {event.event.startTime}{event.event.endTime ? `–${event.event.endTime}` : ''}</div>
+        <div className="briefing-date">
+          {eventSkipped ? `${setup.date} → ${dismantle.date}` : `${evPhase.date}${evPhase.time ? ` · ${evPhase.time}` : ''}`}
+        </div>
       </div>
 
       <div className="briefing-body">
@@ -40,22 +61,22 @@ const Briefing = ({ event, onBack }) => {
           <div className="info-grid">
             <div className="info-box" style={{ borderTop: '3px solid var(--teal)' }}>
               <div className="k">🔨 הקמה</div>
-              <div className="v">{fmtDate(event.setup.date)}</div>
-              <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 13, color: 'var(--ink-2)' }}>{event.setup.time}</div>
+              <div className="v">{setup.date}</div>
+              <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 13, color: 'var(--ink-2)' }}>{setup.time}</div>
             </div>
-            <div className="info-box" style={{ borderTop: '3px solid var(--pink)' }}>
-              <div className="k">🎉 האירוע</div>
-              <div className="v">{fmtDate(event.event.date)}</div>
-              <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 13, color: 'var(--ink-2)' }}>
-                {event.event.startTime}{event.event.endTime ? `–${event.event.endTime}` : ''}
+            {!eventSkipped && (
+              <div className="info-box" style={{ borderTop: '3px solid var(--pink)' }}>
+                <div className="k">🎉 האירוע</div>
+                <div className="v">{evPhase.date}</div>
+                <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 13, color: 'var(--ink-2)' }}>{evPhase.time}</div>
               </div>
-            </div>
+            )}
             <div className="info-box" style={{ borderTop: '3px solid var(--yellow)' }}>
               <div className="k">📦 פירוק</div>
-              <div className="v">{fmtDate(event.dismantle.date)}</div>
-              <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 13, color: 'var(--ink-2)' }}>{event.dismantle.time}</div>
+              <div className="v">{dismantle.date}</div>
+              <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 13, color: 'var(--ink-2)' }}>{dismantle.time}</div>
             </div>
-            <div className="info-box" style={{ gridColumn: 'span 3' }}>
+            <div className="info-box" style={{ gridColumn: `span ${eventSkipped ? 2 : 3}` }}>
               <div className="k"><Icon name="pin" size={11} /> מיקום</div>
               <div className="v">{event.location}</div>
             </div>
@@ -63,18 +84,18 @@ const Briefing = ({ event, onBack }) => {
         </div>
 
         <div className="briefing-section teal">
-          <h3>צוות · {event.workers.length}</h3>
+          <h3>צוות תפעול · {(event.workers || []).length}</h3>
           <div className="worker-chips">
-            {event.workers.map((w, i) => (
+            {(event.workers || []).map((w, i) => (
               <span key={i} className="worker-chip"><span className="av">{w[0]}</span>{w}</span>
             ))}
           </div>
         </div>
 
         <div className="briefing-section">
-          <h3>פריטים · {totalItems} יח׳ · {event.items.length} סוגים</h3>
+          <h3>פריטים · {totalItems} יח׳ · {(event.items || []).length} סוגים</h3>
           <div className="item-list">
-            {event.items.map((it, i) => {
+            {(event.items || []).map((it, i) => {
               const p = productOf(it.id); if (!p) return null;
               return (<div key={it.id} className="row">
                 <span className="idx">{String(i + 1).padStart(2, '0')}</span>
@@ -90,18 +111,39 @@ const Briefing = ({ event, onBack }) => {
         </div>
 
         <div className="briefing-section yellow">
-          <h3>אנשי קשר בשטח ({(event.contacts || []).length})</h3>
-          {(event.contacts || []).map((c, i) => (
-            <div key={i} className="info-grid" style={{ marginBottom: i < event.contacts.length - 1 ? 12 : 0 }}>
-              <div className="info-box"><div className="k">שם</div><div className="v">{c.name || '—'}</div></div>
+          <h3>אנשי קשר בשטח ({allContacts.length})</h3>
+          {allContacts.length === 0 ? (
+            <div style={{ color: 'var(--ink-3)', fontSize: 13 }}>לא הוגדרו אנשי קשר</div>
+          ) : allContacts.map((c, i) => (
+            <div key={i} className="info-grid" style={{ marginBottom: i < allContacts.length - 1 ? 12 : 0 }}>
+              <div className="info-box"><div className="k">{c._kind || 'קשר'}</div><div className="v">{c.name || '—'}</div></div>
               <div className="info-box"><div className="k">תפקיד</div><div className="v">{c.role || '—'}</div></div>
               <div className="info-box"><div className="k">טלפון</div>
                 <div className="v" style={{ fontFamily: 'JetBrains Mono, monospace', direction: 'ltr', textAlign: 'right' }}>{c.phone || '—'}</div></div>
-              {c.notes && <div className="info-box" style={{ gridColumn: '1 / -1' }}>
-                <div className="k">הערות</div><div className="v" style={{ fontWeight: 500, fontSize: 13 }}>{c.notes}</div></div>}
             </div>
           ))}
         </div>
+
+        {(event.productionTasks || []).length > 0 && (
+          <div className="briefing-section">
+            <h3>הפקה ומעקב · {event.productionTasks.length}</h3>
+            <div className="item-list">
+              {event.productionTasks.map((t, i) => (
+                <div key={t.id} className="row" style={{ gridTemplateColumns: '32px 1fr auto auto' }}>
+                  <span style={{ fontSize: 18 }}>{t.received ? '✅' : '⏳'}</span>
+                  <div>
+                    <div className="n">{t.title || '—'}</div>
+                    <div className="loc">{t.type === 'carpentry' ? '🪚 נגרות' : t.type === 'print' ? '📄 דפוס' : '📦 אחר'}</div>
+                  </div>
+                  <span className="loc">{t.sentDate ? `נשלח ${fmtDateShort(t.sentDate)}` : '—'}</span>
+                  <span className="q" style={{ color: t.received ? 'var(--ok)' : 'var(--pink)' }}>
+                    {t.deadline ? fmtDateShort(t.deadline) : '—'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px dashed var(--border)', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
           {event.id} · מחסן · הופק {fmtDate(new Date().toISOString().slice(0, 10))}
